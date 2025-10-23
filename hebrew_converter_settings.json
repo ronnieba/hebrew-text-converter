@@ -1,0 +1,23 @@
+{
+  "hotkeys": {
+    "convert": "<ctrl>+<alt>+h",
+    "exit": [
+      "<ctrl>+<shift>+q",
+      "<alt>+q"
+    ]
+  },
+  "conversion": {
+    "auto_detect_hebrew": true,
+    "skip_terminal_commands": true,
+    "preserve_caps": true
+  },
+  "ui": {
+    "show_splash": true,
+    "splash_duration": 5,
+    "history_size": 50
+  },
+  "logging": {
+    "level": "INFO",
+    "log_to_file": true
+  }
+}
