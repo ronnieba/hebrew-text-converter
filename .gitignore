@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# PyInstaller artifacts
+build/
+dist/
+
+# Log files
+*.log
+
+# Environment files
+.env
+venv/
+*.venv
