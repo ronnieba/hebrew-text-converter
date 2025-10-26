@@ -6,11 +6,12 @@ from pystray import Icon, Menu, MenuItem
 from PIL import Image, ImageDraw
 import sys
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, messagebox
 import queue
 import os
 from datetime import datetime
 import logging
+import json
 
 # הגדרת לוגים
 logging.basicConfig(
@@ -48,8 +49,69 @@ keyboard_controller = keyboard.Controller()
 # משתנים גלובליים
 conversion_history = []
 settings_window = None
+hotkey_settings_file = "hotkey_settings.json"
 
-# 3. פונקציה שבודקת אם הטקסט כבר בעברית
+# הגדרות מקשי קיצור ברירת מחדל
+DEFAULT_HOTKEYS = {
+    "convert": "<ctrl>+<alt>+h",
+    "exit1": "<ctrl>+<shift>+q", 
+    "exit2": "<alt>+q"
+}
+
+# משתנים גלובליים למפתחות קיצור
+current_hotkeys = DEFAULT_HOTKEYS.copy()
+hotkey_listener = None
+
+# 3. פונקציות לניהול מקשי קיצור
+def load_hotkey_settings():
+    """טוען הגדרות מקשי קיצור מקובץ"""
+    global current_hotkeys
+    try:
+        if os.path.exists(hotkey_settings_file):
+            with open(hotkey_settings_file, 'r', encoding='utf-8') as f:
+                saved_hotkeys = json.load(f)
+                current_hotkeys.update(saved_hotkeys)
+                logging.info(f"Loaded hotkey settings: {current_hotkeys}")
+        else:
+            logging.info("No hotkey settings file found, using defaults")
+    except Exception as e:
+        logging.error(f"Error loading hotkey settings: {e}")
+        current_hotkeys = DEFAULT_HOTKEYS.copy()
+
+def save_hotkey_settings():
+    """שומר הגדרות מקשי קיצור לקובץ"""
+    try:
+        with open(hotkey_settings_file, 'w', encoding='utf-8') as f:
+            json.dump(current_hotkeys, f, ensure_ascii=False, indent=2)
+        logging.info(f"Saved hotkey settings: {current_hotkeys}")
+    except Exception as e:
+        logging.error(f"Error saving hotkey settings: {e}")
+
+def validate_hotkey(hotkey_string):
+    """בודק אם מקש קיצור תקין"""
+    if not hotkey_string:
+        return False, "מקש קיצור לא יכול להיות ריק"
+    
+    # בדיקה בסיסית של פורמט
+    valid_modifiers = ['ctrl', 'alt', 'shift']
+    parts = hotkey_string.lower().replace('<', '').replace('>', '').split('+')
+    
+    if len(parts) < 2:
+        return False, "מקש קיצור חייב לכלול לפחות מודיפייר ומקש אחד"
+    
+    # בדוק מודיפיירים
+    modifiers = parts[:-1]
+    for mod in modifiers:
+        if mod not in valid_modifiers:
+            return False, f"מודיפייר לא תקין: {mod}"
+    
+    # בדוק שאין כפילויות
+    if len(modifiers) != len(set(modifiers)):
+        return False, "אין אפשרות להשתמש באותו מודיפייר פעמיים"
+    
+    return True, "תקין"
+
+# 4. פונקציה שבודקת אם הטקסט כבר בעברית
 def is_hebrew_text(text):
     """בודק אם הטקסט מכיל אותיות עבריות."""
     hebrew_chars = 'אבגדהוזחטיכלמנסעפצקרשתךםןףץ'
@@ -233,12 +295,70 @@ def show_settings():
                               font=("Tahoma", 16, "bold"))
         title_label.pack(pady=15)
         
-        # מידע על מקשי הקיצור
-        hotkey_frame = tk.LabelFrame(settings_window, text="Hotkeys", font=("Tahoma", 10, "bold"))
+        # הגדרות מקשי קיצור
+        hotkey_frame = tk.LabelFrame(settings_window, text="הגדרות מקשי קיצור", font=("Tahoma", 10, "bold"))
         hotkey_frame.pack(pady=10, padx=20, fill="x")
         
-        tk.Label(hotkey_frame, text="Ctrl+Alt+H - Convert selected text", font=("Tahoma", 9)).pack(anchor="w", padx=10, pady=5)
-        tk.Label(hotkey_frame, text="Alt+Q or Ctrl+Shift+Q - Exit", font=("Tahoma", 9)).pack(anchor="w", padx=10, pady=5)
+        # משתנים למפתחות קיצור
+        convert_hotkey_var = tk.StringVar(value=current_hotkeys["convert"])
+        exit1_hotkey_var = tk.StringVar(value=current_hotkeys["exit1"])
+        exit2_hotkey_var = tk.StringVar(value=current_hotkeys["exit2"])
+        
+        # תוויות ושדות קלט
+        tk.Label(hotkey_frame, text="מקש המרה:", font=("Tahoma", 9)).grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        convert_entry = tk.Entry(hotkey_frame, textvariable=convert_hotkey_var, width=20, font=("Tahoma", 9))
+        convert_entry.grid(row=0, column=1, padx=10, pady=5)
+        
+        tk.Label(hotkey_frame, text="מקש יציאה 1:", font=("Tahoma", 9)).grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        exit1_entry = tk.Entry(hotkey_frame, textvariable=exit1_hotkey_var, width=20, font=("Tahoma", 9))
+        exit1_entry.grid(row=1, column=1, padx=10, pady=5)
+        
+        tk.Label(hotkey_frame, text="מקש יציאה 2:", font=("Tahoma", 9)).grid(row=2, column=0, sticky="w", padx=10, pady=5)
+        exit2_entry = tk.Entry(hotkey_frame, textvariable=exit2_hotkey_var, width=20, font=("Tahoma", 9))
+        exit2_entry.grid(row=2, column=1, padx=10, pady=5)
+        
+        # הודעת עזרה
+        help_label = tk.Label(hotkey_frame, 
+                             text="דוגמאות: <ctrl>+<alt>+h, <shift>+<ctrl>+q, <alt>+q", 
+                             font=("Tahoma", 8), fg="gray")
+        help_label.grid(row=3, column=0, columnspan=2, padx=10, pady=5)
+        
+        # כפתור שמירה
+        def save_hotkeys():
+            global current_hotkeys
+            new_convert = convert_hotkey_var.get().strip()
+            new_exit1 = exit1_hotkey_var.get().strip()
+            new_exit2 = exit2_hotkey_var.get().strip()
+            
+            # בדיקת תקינות
+            is_valid, message = validate_hotkey(new_convert)
+            if not is_valid:
+                tk.messagebox.showerror("שגיאה", f"מקש המרה: {message}")
+                return
+                
+            is_valid, message = validate_hotkey(new_exit1)
+            if not is_valid:
+                tk.messagebox.showerror("שגיאה", f"מקש יציאה 1: {message}")
+                return
+                
+            is_valid, message = validate_hotkey(new_exit2)
+            if not is_valid:
+                tk.messagebox.showerror("שגיאה", f"מקש יציאה 2: {message}")
+                return
+            
+            # עדכון המפתחות
+            current_hotkeys["convert"] = new_convert
+            current_hotkeys["exit1"] = new_exit1
+            current_hotkeys["exit2"] = new_exit2
+            
+            # שמירה לקובץ
+            save_hotkey_settings()
+            
+            # הודעה על הצלחה
+            tk.messagebox.showinfo("הצלחה", "מקשי הקיצור נשמרו בהצלחה!\nיש להפעיל מחדש את התוכנה כדי שהשינויים ייכנסו לתוקף.")
+            
+        tk.Button(hotkey_frame, text="שמור מקשי קיצור", 
+                 command=save_hotkeys, font=("Tahoma", 9)).grid(row=4, column=0, columnspan=2, pady=10)
         
         # היסטוריית המרות
         history_frame = tk.LabelFrame(settings_window, text="Conversion History", font=("Tahoma", 10, "bold"))
@@ -346,9 +466,9 @@ def show_status():
                                font=("Arial", 11, "bold"))
         hotkey_label.pack(pady=(20, 5))
         
-        tk.Label(status_window, text="Ctrl+Alt+H - המרת טקסט מסומן", 
+        tk.Label(status_window, text=f"{current_hotkeys['convert']} - המרת טקסט מסומן", 
                  font=("Arial", 10)).pack(pady=2)
-        tk.Label(status_window, text="Alt+Q או Ctrl+Shift+Q - יציאה", 
+        tk.Label(status_window, text=f"{current_hotkeys['exit1']} או {current_hotkeys['exit2']} - יציאה", 
                  font=("Arial", 10)).pack(pady=2)
         
         # סטטיסטיקות
@@ -385,20 +505,25 @@ icon = Icon("ממיר עברית", create_image(),
 # 9. הגדרת והפעלת ה-Listener הגלובלי
 def start_hotkey_listener():
     """מתחיל את מאזין המקשים"""
+    global hotkey_listener
     logging.info("ממיר עברית פועל...")
     print("ממיר עברית פועל...")
-    print(" - לחץ [Ctrl+Alt+H] להמרת טקסט מסומן")
+    print(f" - לחץ [{current_hotkeys['convert']}] להמרת טקסט מסומן")
+    print(f" - לחץ [{current_hotkeys['exit1']}] או [{current_hotkeys['exit2']}] ליציאה")
     print(" - ימין קליק על האייקון ליציאה")
     print("ממתין למקש קיצור...")
 
     # מאזין ללחיצות מקשים באופן גלובלי
     try:
-        with keyboard.GlobalHotKeys({
-                '<ctrl>+<alt>+h': do_conversion_action,
-                '<ctrl>+<shift>+q': on_exit,
-                '<alt>+q': on_exit
-        }) as h:
-            h.join()
+        hotkey_dict = {
+            current_hotkeys['convert']: do_conversion_action,
+            current_hotkeys['exit1']: on_exit,
+            current_hotkeys['exit2']: on_exit
+        }
+        
+        hotkey_listener = keyboard.GlobalHotKeys(hotkey_dict)
+        hotkey_listener.start()
+        hotkey_listener.join()
     except Exception as e:
         logging.error(f"An error occurred: {e}")
         print(f"An error occurred: {e}")
@@ -408,6 +533,9 @@ def start_hotkey_listener():
 if __name__ == "__main__":
     try:
         logging.info("Starting Hebrew Converter...")
+        
+        # טען הגדרות מקשי קיצור
+        load_hotkey_settings()
         
         # הצג splash screen בהפעלה
         splash_thread = threading.Thread(target=show_splash_screen, daemon=True)
